@@ -10,17 +10,18 @@ from seleniumbase import SB
 try:
     from geeked.slide import SlideSolver
 except ImportError:
-    print("[-] 模块导入失败")
+    print("[-] 警告: 未找到 geeked 模块")
 
 CHECKIN_URL = "https://gpt.qt.cool/checkin"
 
 def get_human_track(distance):
     track = []
     current = 0
-    # 距离 209px 较长，增加步数模拟真实加速感
-    steps = random.randint(85, 110)
+    # 针对长位移 (213px)，大幅增加步数以平摊请求压力
+    steps = random.randint(90, 120)
     for i in range(1, steps + 1):
         t = i / steps
+        # 五次方曲线：平滑减速
         move = round(distance * (1 - math.pow(1 - t, 5)))
         track.append(move - current)
         current = move
@@ -43,19 +44,19 @@ def run_checkin(sb):
     from selenium.webdriver.common.action_chains import ActionChains
     sk = os.environ.get("QTCOOL_SK")
     
-    # 指纹抹除
+    # 彻底抹除 WebDriver 指纹 (核心防封)
     sb.execute_cdp_cmd("Page.addScriptToEvaluateOnNewDocument", {
         "source": "Object.defineProperty(navigator, 'webdriver', {get: () => undefined})"
     })
 
     print("[*] 正在载入晴辰云...")
     sb.open(CHECKIN_URL)
-    sb.sleep(5)
+    sb.sleep(6) # 增加首屏加载缓冲
     
     # 登录
     sb.type('input#renewKey', sk)
     sb.click('button[onclick*="doRenewLogin"]')
-    sb.sleep(8)
+    sb.sleep(10)
     
     # 签到
     if sb.is_element_visible("#checkinBtn"):
@@ -63,10 +64,10 @@ def run_checkin(sb):
         sb.click("#checkinBtn")
     
     print("[*] 正在捕获验证码...")
-    sb.sleep(10) 
+    sb.sleep(12) # 给极验 4.0 充足的动画加载时间
     
     try:
-        # 1. 提取图片 (已验证成功的逻辑)
+        # 1. 提取图片 URL
         js_get_imgs = """
         var bg = getComputedStyle(document.querySelector('div[class*="geetest_bg_"]')).backgroundImage;
         var slice = getComputedStyle(document.querySelector('div[class*="geetest_slice_bg_"]')).backgroundImage;
@@ -76,7 +77,7 @@ def run_checkin(sb):
         bg_url = re.search(r'url\("?(.*?)"?\)', urls[0]).group(1)
         slice_url = re.search(r'url\("?(.*?)"?\)', urls[1]).group(1)
 
-        print(f"[+] 图片抓取成功，计算距离...")
+        print(f"[+] 图片抓取成功，准备计算...")
         bg_content = requests.get(bg_url, timeout=10).content
         slice_content = requests.get(slice_url, timeout=10).content
         
@@ -86,41 +87,42 @@ def run_checkin(sb):
         
         # 2. 定位按钮 (增加稳定性处理)
         btn_selector = 'div[class*="geetest_btn"]'
-        sb.wait_for_element_visible(btn_selector, timeout=15)
-        
-        # 获取原始的 WebDriver 元素对象，防止 SeleniumBase 包装类导致的兼容问题
+        # 只要存在就操作，不强求 visible 以防 WAF 干扰
+        sb.wait_for_element_present(btn_selector, timeout=20)
         slider_btn = sb.driver.find_element("css selector", btn_selector)
-        print(f"[+] 成功锁定底层按钮元素")
 
-        # 3. 滑动动作
+        # 3. 滑动动作 (ActionChains)
         tracks = get_human_track(distance)
         
-        # 使用标准的 ActionChains 并直接作用于 driver
-        actions = ActionChains(sb.driver, duration=0)
+        # 降低 ActionChains 的内部频率，防止 Connection refused
+        actions = ActionChains(sb.driver)
         actions.click_and_hold(slider_btn).perform()
         
         for x in tracks:
-            # 模拟 X 轴位移和 Y 轴抖动
+            # 模拟随机抖动并执行
             actions.move_by_offset(x, random.choice([-1, 0, 1])).perform()
-            # 极短的随机延迟，增加拟人度
-            time.sleep(random.uniform(0.005, 0.015))
+            # 关键：稍微增加每一步的等待，防止过快导致浏览器崩溃
+            time.sleep(random.uniform(0.02, 0.04))
         
-        time.sleep(0.8)
+        sb.sleep(1)
         actions.release().perform()
-        print("[+] 滑动动作已释放，等待校验...")
-        sb.sleep(12)
+        print("[+] 滑动动作已释放，等待最终校验...")
+        sb.sleep(15) # 给签到成功后的页面跳转留出充足时间
 
     except Exception as e:
         print(f"[*] 流程异常: {e}")
-        sb.save_screenshot("debug_error.png")
+        # 异常时也要尝试截图
+        try: sb.save_screenshot("debug_error.png")
+        except: pass
 
-    # 结果报告
+    # 结果捕获
     photo = "result.png"
     sb.save_screenshot(photo)
     expiry = sb.get_text("#renewUserExpiry") if sb.is_element_present("#renewUserExpiry") else "N/A"
-    status = sb.get_text("#heroBadgeText") if sb.is_element_present("#heroBadgeText") else "Done"
+    status = sb.get_text("#heroBadgeText") if sb.is_element_present("#heroBadgeText") else "End"
     send_tg_report(expiry, status, photo)
 
 if __name__ == "__main__":
-    with SB(uc=True, test=True, locale="zh_CN") as sb:
+    # 使用增强配置：uc 模式、ad_block、禁止弹出窗口
+    with SB(uc=True, test=True, ad_block=True, locale="zh_CN") as sb:
         run_checkin(sb)
