@@ -8,7 +8,7 @@ jobs:
   update:
     runs-on: ubuntu-latest
     permissions:
-      contents: write  # 必须开启写入权限
+      contents: write  # 必须开启写入权限以推送代码
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -24,23 +24,41 @@ jobs:
       - name: Run Deobfuscator
         id: run_script
         run: |
+          # 运行脚本并获取完整输出
           output=$(python deobfuscate.py)
-          echo "VERSION=$(echo "$output" | grep '\[~\] Version:' | awk '{print $3}')" >> $GITHUB_ENV
-          echo "ABO=$(echo "$output" | grep '\[+\] abo:' | sed 's/.*: //')" >> $GITHUB_ENV
-          echo "MAPPINGS=$(echo "$output" | grep '\[+\] mappings' | sed 's/\[+\] mappings //')" >> $GITHUB_ENV
-          echo "DEVICE_ID=$(echo "$output" | grep '\[+\] device_id:' | sed -n 's/.*: \(\"[^\"]*\"\).*/\1/p')" >> $GITHUB_ENV
+          
+          # 提取变量并存入环境变量，增加双引号处理以防字符冲突
+          V=$(echo "$output" | grep '\[~\] Version:' | awk '{print $3}')
+          A=$(echo "$output" | grep '\[+\] abo:' | sed 's/.*: //')
+          M=$(echo "$output" | grep '\[+\] mappings' | sed 's/\[+\] mappings //')
+          D=$(echo "$output" | grep '\[+\] device_id:' | sed -n 's/.*: \(\"[^\"]*\"\).*/\1/p')
+
+          echo "VERSION=$V" >> $GITHUB_ENV
+          echo "ABO=$A" >> $GITHUB_ENV
+          echo "MAPPINGS=$M" >> $GITHUB_ENV
+          echo "DEVICE_ID=$D" >> $GITHUB_ENV
 
       - name: Force Update Logic Files
         run: |
           # 强制替换 sign.py 里的动态常量
-          sed -i "s|self.mapping = {.*}|self.mapping = $MAPPINGS|" ./geeked/sign.py
-          sed -i "s|abo = {.*}|abo = $ABO|" ./geeked/sign.py
-          sed -i "s|\"device_id\": \".*\"|\"device_id\": $DEVICE_ID|" ./geeked/sign.py
+          # 匹配 self.mapping = { ... }
+          sed -i "s|self.mapping = {.*}|self.mapping = ${MAPPINGS}|" ./geeked/sign.py
+          
+          # 匹配 abo = { ... }
+          sed -i "s|abo = {.*}|abo = ${ABO}|" ./geeked/sign.py
+          
+          # 匹配 "device_id": "..."
+          sed -i "s|\"device_id\": \".*\"|\"device_id\": ${DEVICE_ID}|" ./geeked/sign.py
 
       - name: Auto Push to Main
         run: |
           git config --global user.name "github-actions[bot]"
           git config --global user.email "github-actions[bot]@users.noreply.github.com"
           git add .
-          # 只有在有变化时才提交，防止报错
-          git diff --quiet && git diff --staged --quiet || (git commit -m "🤖 自动同步极验算法: ${{ env.VERSION }}" && git push)
+          # 检查是否有文件变动
+          if git diff --quiet && git diff --staged --quiet; then
+            echo "没有检测到算法更新，跳过提交。"
+          else
+            git commit -m "🤖 自动同步极验算法: ${{ env.VERSION }}"
+            git push
+          fi
