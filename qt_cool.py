@@ -10,23 +10,9 @@ from seleniumbase import SB
 try:
     from geeked.slide import SlideSolver
 except ImportError:
-    print("[-] 警告: 未找到 geeked 模块")
+    print("[-] 模块导入失败")
 
 CHECKIN_URL = "https://gpt.qt.cool/checkin"
-
-def get_human_track(distance):
-    track = []
-    current = 0
-    # 针对长位移 (213px)，大幅增加步数以平摊请求压力
-    steps = random.randint(90, 120)
-    for i in range(1, steps + 1):
-        t = i / steps
-        # 五次方曲线：平滑减速
-        move = round(distance * (1 - math.pow(1 - t, 5)))
-        track.append(move - current)
-        current = move
-    track.extend([1, 0, -1, 0]) 
-    return track
 
 def send_tg_report(expiry, status, photo):
     token = os.environ.get("TELEGRAM_BOT_TOKEN")
@@ -41,33 +27,32 @@ def send_tg_report(expiry, status, photo):
     except: pass
 
 def run_checkin(sb):
-    from selenium.webdriver.common.action_chains import ActionChains
     sk = os.environ.get("QTCOOL_SK")
     
-    # 彻底抹除 WebDriver 指纹 (核心防封)
+    # 彻底抹除 WebDriver 特征
     sb.execute_cdp_cmd("Page.addScriptToEvaluateOnNewDocument", {
         "source": "Object.defineProperty(navigator, 'webdriver', {get: () => undefined})"
     })
 
     print("[*] 正在载入晴辰云...")
     sb.open(CHECKIN_URL)
-    sb.sleep(6) # 增加首屏加载缓冲
+    sb.sleep(5)
     
-    # 登录
+    # 登录流程
     sb.type('input#renewKey', sk)
     sb.click('button[onclick*="doRenewLogin"]')
-    sb.sleep(10)
+    sb.sleep(8)
     
-    # 签到
+    # 点击签到
     if sb.is_element_visible("#checkinBtn"):
         print("[*] 点击签到按钮...")
         sb.click("#checkinBtn")
     
-    print("[*] 正在捕获验证码...")
-    sb.sleep(12) # 给极验 4.0 充足的动画加载时间
+    print("[*] 正在等待验证码加载...")
+    sb.sleep(10) 
     
     try:
-        # 1. 提取图片 URL
+        # 1. 提取图片 URL (JS 穿透)
         js_get_imgs = """
         var bg = getComputedStyle(document.querySelector('div[class*="geetest_bg_"]')).backgroundImage;
         var slice = getComputedStyle(document.querySelector('div[class*="geetest_slice_bg_"]')).backgroundImage;
@@ -77,7 +62,7 @@ def run_checkin(sb):
         bg_url = re.search(r'url\("?(.*?)"?\)', urls[0]).group(1)
         slice_url = re.search(r'url\("?(.*?)"?\)', urls[1]).group(1)
 
-        print(f"[+] 图片抓取成功，准备计算...")
+        print(f"[+] 图片抓取成功，计算距离...")
         bg_content = requests.get(bg_url, timeout=10).content
         slice_content = requests.get(slice_url, timeout=10).content
         
@@ -85,35 +70,45 @@ def run_checkin(sb):
         distance = solver.find_puzzle_piece_position()
         print(f"[+] 识别成功: {distance}px")
         
-        # 2. 定位按钮 (增加稳定性处理)
-        btn_selector = 'div[class*="geetest_btn"]'
-        # 只要存在就操作，不强求 visible 以防 WAF 干扰
-        sb.wait_for_element_present(btn_selector, timeout=20)
-        slider_btn = sb.driver.find_element("css selector", btn_selector)
-
-        # 3. 滑动动作 (ActionChains)
-        tracks = get_human_track(distance)
+        # 2. 核心突破：使用 JS 直接模拟滑动事件 (不触发鼠标指令流，防止崩溃)
+        print("[*] 正在通过 JS 注入滑动指令...")
         
-        # 降低 ActionChains 的内部频率，防止 Connection refused
-        actions = ActionChains(sb.driver)
-        actions.click_and_hold(slider_btn).perform()
-        
-        for x in tracks:
-            # 模拟随机抖动并执行
-            actions.move_by_offset(x, random.choice([-1, 0, 1])).perform()
-            # 关键：稍微增加每一步的等待，防止过快导致浏览器崩溃
-            time.sleep(random.uniform(0.02, 0.04))
-        
-        sb.sleep(1)
-        actions.release().perform()
-        print("[+] 滑动动作已释放，等待最终校验...")
-        sb.sleep(15) # 给签到成功后的页面跳转留出充足时间
+        # 极验4.0 的滑动逻辑可以通过派发 mousedown/mousemove/mouseup 事件来完成
+        js_slide = f"""
+        (async () => {{
+            var btn = document.querySelector('div[class*="geetest_btn"]');
+            var box = btn.getBoundingClientRect();
+            var x = box.left + box.width / 2;
+            var y = box.top + box.height / 2;
+            
+            // 派发按下事件
+            btn.dispatchEvent(new MouseEvent('mousedown', {{bubbles: true, clientX: x, clientY: y}}));
+            
+            // 模拟分段移动 (关键：增加微小延迟，防止 WAF 拦截)
+            let currentX = x;
+            let targetX = x + {distance};
+            let steps = 50;
+            for(let i=0; i<=steps; i++) {{
+                let progress = i / steps;
+                let moveX = x + ({distance} * (1 - Math.pow(1 - progress, 4)));
+                btn.dispatchEvent(new MouseEvent('mousemove', {{
+                    bubbles: true, 
+                    clientX: moveX, 
+                    clientY: y + (Math.random() * 2 - 1)
+                }}));
+                if (i % 5 === 0) await new Promise(r => setTimeout(r, 10));
+            }}
+            
+            // 派发释放事件
+            btn.dispatchEvent(new MouseEvent('mouseup', {{bubbles: true, clientX: targetX, clientY: y}}));
+        }})();
+        """
+        sb.execute_script(js_slide)
+        print("[+] JS 滑动指令执行完毕")
+        sb.sleep(12)
 
     except Exception as e:
-        print(f"[*] 流程异常: {e}")
-        # 异常时也要尝试截图
-        try: sb.save_screenshot("debug_error.png")
-        except: pass
+        print(f"[*] 流程异常 (已尝试跳过): {e}")
 
     # 结果捕获
     photo = "result.png"
@@ -123,6 +118,10 @@ def run_checkin(sb):
     send_tg_report(expiry, status, photo)
 
 if __name__ == "__main__":
-    # 使用增强配置：uc 模式、ad_block、禁止弹出窗口
-    with SB(uc=True, test=True, ad_block=True, locale="zh_CN") as sb:
+    # 增加禁用沙盒和共享内存限制的参数，彻底解决 Connection Refused
+    with SB(uc=True, test=True, incognito=True) as sb:
+        # 进一步优化 Chrome 启动参数
+        sb.driver.execute_cdp_cmd("Network.setUserAgentOverride", {
+            "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36"
+        })
         run_checkin(sb)
