@@ -17,15 +17,13 @@ CHECKIN_URL = "https://gpt.qt.cool/checkin"
 def get_human_track(distance):
     track = []
     current = 0
-    # 模拟真人滑动，步数控制在 80-100
-    steps = random.randint(80, 100)
+    # 距离 209px 较长，增加步数模拟真实加速感
+    steps = random.randint(85, 110)
     for i in range(1, steps + 1):
         t = i / steps
-        # 五次方曲线：开始快，后面极慢对准
         move = round(distance * (1 - math.pow(1 - t, 5)))
         track.append(move - current)
         current = move
-    # 终点微调
     track.extend([1, 0, -1, 0]) 
     return track
 
@@ -45,7 +43,7 @@ def run_checkin(sb):
     from selenium.webdriver.common.action_chains import ActionChains
     sk = os.environ.get("QTCOOL_SK")
     
-    # 彻底抹除 WebDriver 指纹
+    # 指纹抹除
     sb.execute_cdp_cmd("Page.addScriptToEvaluateOnNewDocument", {
         "source": "Object.defineProperty(navigator, 'webdriver', {get: () => undefined})"
     })
@@ -68,8 +66,7 @@ def run_checkin(sb):
     sb.sleep(10) 
     
     try:
-        # 1. 提取图片 (使用模糊匹配 + JS 强取)
-        # 根据你的截图，类名包含 geetest_bg_ 和 geetest_slice_bg_
+        # 1. 提取图片 (已验证成功的逻辑)
         js_get_imgs = """
         var bg = getComputedStyle(document.querySelector('div[class*="geetest_bg_"]')).backgroundImage;
         var slice = getComputedStyle(document.querySelector('div[class*="geetest_slice_bg_"]')).backgroundImage;
@@ -79,55 +76,49 @@ def run_checkin(sb):
         bg_url = re.search(r'url\("?(.*?)"?\)', urls[0]).group(1)
         slice_url = re.search(r'url\("?(.*?)"?\)', urls[1]).group(1)
 
-        print(f"[+] 图片抓取成功，准备计算...")
+        print(f"[+] 图片抓取成功，计算距离...")
         bg_content = requests.get(bg_url, timeout=10).content
         slice_content = requests.get(slice_url, timeout=10).content
         
         solver = SlideSolver(slice_content, bg_content)
         distance = solver.find_puzzle_piece_position()
-        print(f"[+] 识别成功，计算距离: {distance}px")
+        print(f"[+] 识别成功: {distance}px")
         
-        # 2. 定位滑动按钮 (根据你截图中的 geetest_btn 关键类名)
-        btn_selectors = [
-            'div[class*="geetest_btn"]', # 你的截图明确显示了这个类名
-            'div[class*="slider_button"]',
-            '.geetest_slider_button'
-        ]
+        # 2. 定位按钮 (增加稳定性处理)
+        btn_selector = 'div[class*="geetest_btn"]'
+        sb.wait_for_element_visible(btn_selector, timeout=15)
         
-        slider_btn = None
-        for sel in btn_selectors:
-            if sb.is_element_present(sel):
-                slider_btn = sb.find_element(sel)
-                print(f"[+] 成功锁定按钮: {sel}")
-                break
-        
-        if not slider_btn:
-            raise Exception("无法定位滑动按钮")
+        # 获取原始的 WebDriver 元素对象，防止 SeleniumBase 包装类导致的兼容问题
+        slider_btn = sb.driver.find_element("css selector", btn_selector)
+        print(f"[+] 成功锁定底层按钮元素")
 
-        # 3. 滑动动作 (ActionChains)
+        # 3. 滑动动作
         tracks = get_human_track(distance)
-        ActionChains(sb.driver).click_and_hold(slider_btn).perform()
+        
+        # 使用标准的 ActionChains 并直接作用于 driver
+        actions = ActionChains(sb.driver, duration=0)
+        actions.click_and_hold(slider_btn).perform()
         
         for x in tracks:
-            # 必须加入 Y 轴随机偏移，模拟真人手抖
-            y_offset = random.choice([-1, 0, 1]) if random.random() > 0.8 else 0
-            ActionChains(sb.driver).move_by_offset(x, y_offset).perform()
-            time.sleep(random.uniform(0.01, 0.02))
+            # 模拟 X 轴位移和 Y 轴抖动
+            actions.move_by_offset(x, random.choice([-1, 0, 1])).perform()
+            # 极短的随机延迟，增加拟人度
+            time.sleep(random.uniform(0.005, 0.015))
         
-        sb.sleep(1)
-        ActionChains(sb.driver).release().perform()
-        print("[+] 滑动流程结束")
+        time.sleep(0.8)
+        actions.release().perform()
+        print("[+] 滑动动作已释放，等待校验...")
         sb.sleep(12)
 
     except Exception as e:
         print(f"[*] 流程异常: {e}")
-        sb.save_screenshot("debug_final.png")
+        sb.save_screenshot("debug_error.png")
 
-    # 报告发送
+    # 结果报告
     photo = "result.png"
     sb.save_screenshot(photo)
     expiry = sb.get_text("#renewUserExpiry") if sb.is_element_present("#renewUserExpiry") else "N/A"
-    status = sb.get_text("#heroBadgeText") if sb.is_element_present("#heroBadgeText") else "End"
+    status = sb.get_text("#heroBadgeText") if sb.is_element_present("#heroBadgeText") else "Done"
     send_tg_report(expiry, status, photo)
 
 if __name__ == "__main__":
