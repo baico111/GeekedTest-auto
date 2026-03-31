@@ -20,7 +20,7 @@ def send_tg_report(expiry, status, photo):
     chat_id = os.environ.get("MY_CHAT_ID")
     if not token or not chat_id: return
     now = (datetime.datetime.utcnow() + datetime.timedelta(hours=8)).strftime('%Y-%m-%d %H:%M:%S')
-    caption = f"✅ <b>Qt-Cool 签到报告</b>\n---\n👤 状态: {status}\n📅 到期: {expiry}\n🕒 时间: {now}"
+    caption = f"📸 <b>Qt-Cool 调试报告</b>\n---\n👤 状态: {status}\n📅 到期: {expiry}\n🕒 时间: {now}"
     try:
         url = f"https://api.telegram.org/bot{token}/sendPhoto"
         with open(photo, 'rb') as f:
@@ -70,55 +70,56 @@ def run_checkin(sb):
         distance = solver.find_puzzle_piece_position()
         print(f"[+] 识别距离: {distance}px")
         
-        # 2. 增强型 JS 拟人滑动脚本
-        # 增加了轨迹平滑度和释放前的犹豫感
-        print("[*] 正在执行拟人化 JS 滑动指令...")
-        js_slide_v4_final = f"""
+        # 2. 拟人化 JS 滑动指令
+        print("[*] 正在执行 JS 动作并准备秒截...")
+        js_slide_debug = f"""
         (async () => {{
             var btn = document.querySelector('div[class*="geetest_btn"]');
             var box = btn.getBoundingClientRect();
             var startX = box.left + box.width / 2;
             var startY = box.top + box.height / 2;
             
-            // 1. 按下
             btn.dispatchEvent(new MouseEvent('mousedown', {{bubbles: true, clientX: startX, clientY: startY}}));
-            await new Promise(r => setTimeout(r, {random.randint(150, 300)}));
+            await new Promise(r => setTimeout(r, {random.randint(100, 200)}));
 
-            // 2. 滑动：增加步数让轨迹更细腻
-            let steps = 75;
+            let steps = 60;
             for(let i=1; i<=steps; i++) {{
                 let progress = i / steps;
-                // 五次方曲线模拟人类对准时的极致谨慎
                 let moveX = startX + ({distance} * (1 - Math.pow(1 - progress, 5)));
-                let moveY = startY + (Math.random() * 2 - 1);
-                
                 btn.dispatchEvent(new MouseEvent('mousemove', {{
                     bubbles: true, 
                     clientX: moveX, 
-                    clientY: moveY
+                    clientY: startY + (Math.random() * 2 - 1)
                 }}));
                 if (i % 2 === 0) await new Promise(r => setTimeout(r, 10));
             }}
             
-            // 3. 终点犹豫：模拟人眼确认位置
-            await new Promise(r => setTimeout(r, {random.randint(300, 600)}));
-            
-            // 4. 释放
+            await new Promise(r => setTimeout(r, 200));
             btn.dispatchEvent(new MouseEvent('mouseup', {{bubbles: true, clientX: startX + {distance}, clientY: startY}}));
         }})();
         """
-        sb.execute_script(js_slide_v4_final)
-        print("[+] 指令执行完毕，等待系统校验...")
-        sb.sleep(15)
+        sb.execute_script(js_slide_debug)
+        
+        # --- 核心修改：滑动结束后立即截图 ---
+        print("[!] 动作执行完毕，立即抓拍...")
+        sb.sleep(0.5) # 极短缓冲，确保 mouseup 动作被浏览器处理完
+        photo = "debug_action.png"
+        sb.save_screenshot(photo)
+        print(f"[+] 现场截图已保存: {photo}")
+        
+        # 接下来再等校验结果
+        sb.sleep(10)
 
     except Exception as e:
-        print(f"[*] 破解异常: {e}")
+        print(f"[*] 流程异常: {e}")
+        photo = "debug_error.png"
+        sb.save_screenshot(photo)
 
-    # 结果捕获
-    photo = "result.png"
-    sb.save_screenshot(photo)
-    expiry = sb.get_text("#renewUserExpiry") if sb.is_element_present("#renewUserExpiry") else "N/A"
-    status = sb.get_text("#heroBadgeText") if sb.is_element_present("#heroBadgeText") else "End"
+    # 结果抓取（最终报告）
+    expiry = sb.get_text("#renewUserExpiry") if sb.is_element_present("#renewUserExpiry") else "Wait for check..."
+    status = sb.get_text("#heroBadgeText") if sb.is_element_present("#heroBadgeText") else "Action Captured"
+    
+    # 发送刚才那张“秒截”的图
     send_tg_report(expiry, status, photo)
 
 if __name__ == "__main__":
