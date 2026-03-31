@@ -7,6 +7,7 @@ import random
 import math
 from seleniumbase import SB
 
+# 保持原作者模块导入逻辑
 try:
     from geeked.slide import SlideSolver
 except ImportError:
@@ -38,7 +39,7 @@ def run_checkin(sb):
     sb.open(CHECKIN_URL)
     sb.sleep(5)
     
-    # 登录流程
+    # 登录
     sb.type('input#renewKey', sk)
     sb.click('button[onclick*="doRenewLogin"]')
     sb.sleep(8)
@@ -48,11 +49,11 @@ def run_checkin(sb):
         print("[*] 点击签到按钮...")
         sb.click("#checkinBtn")
     
-    print("[*] 正在等待验证码加载...")
+    print("[*] 正在捕获动态验证码...")
     sb.sleep(10) 
     
     try:
-        # 1. 提取图片 URL (JS 穿透)
+        # 1. 提取图片 (JS 穿透)
         js_get_imgs = """
         var bg = getComputedStyle(document.querySelector('div[class*="geetest_bg_"]')).backgroundImage;
         var slice = getComputedStyle(document.querySelector('div[class*="geetest_slice_bg_"]')).backgroundImage;
@@ -62,53 +63,56 @@ def run_checkin(sb):
         bg_url = re.search(r'url\("?(.*?)"?\)', urls[0]).group(1)
         slice_url = re.search(r'url\("?(.*?)"?\)', urls[1]).group(1)
 
-        print(f"[+] 图片抓取成功，计算距离...")
         bg_content = requests.get(bg_url, timeout=10).content
         slice_content = requests.get(slice_url, timeout=10).content
         
         solver = SlideSolver(slice_content, bg_content)
         distance = solver.find_puzzle_piece_position()
-        print(f"[+] 识别成功: {distance}px")
+        print(f"[+] 识别距离: {distance}px")
         
-        # 2. 核心突破：使用 JS 直接模拟滑动事件 (不触发鼠标指令流，防止崩溃)
-        print("[*] 正在通过 JS 注入滑动指令...")
-        
-        # 极验4.0 的滑动逻辑可以通过派发 mousedown/mousemove/mouseup 事件来完成
-        js_slide = f"""
+        # 2. 增强型 JS 拟人滑动脚本
+        # 增加了轨迹平滑度和释放前的犹豫感
+        print("[*] 正在执行拟人化 JS 滑动指令...")
+        js_slide_v4_final = f"""
         (async () => {{
             var btn = document.querySelector('div[class*="geetest_btn"]');
             var box = btn.getBoundingClientRect();
-            var x = box.left + box.width / 2;
-            var y = box.top + box.height / 2;
+            var startX = box.left + box.width / 2;
+            var startY = box.top + box.height / 2;
             
-            // 派发按下事件
-            btn.dispatchEvent(new MouseEvent('mousedown', {{bubbles: true, clientX: x, clientY: y}}));
-            
-            // 模拟分段移动 (关键：增加微小延迟，防止 WAF 拦截)
-            let currentX = x;
-            let targetX = x + {distance};
-            let steps = 50;
-            for(let i=0; i<=steps; i++) {{
+            // 1. 按下
+            btn.dispatchEvent(new MouseEvent('mousedown', {{bubbles: true, clientX: startX, clientY: startY}}));
+            await new Promise(r => setTimeout(r, {random.randint(150, 300)}));
+
+            // 2. 滑动：增加步数让轨迹更细腻
+            let steps = 75;
+            for(let i=1; i<=steps; i++) {{
                 let progress = i / steps;
-                let moveX = x + ({distance} * (1 - Math.pow(1 - progress, 4)));
+                // 五次方曲线模拟人类对准时的极致谨慎
+                let moveX = startX + ({distance} * (1 - Math.pow(1 - progress, 5)));
+                let moveY = startY + (Math.random() * 2 - 1);
+                
                 btn.dispatchEvent(new MouseEvent('mousemove', {{
                     bubbles: true, 
                     clientX: moveX, 
-                    clientY: y + (Math.random() * 2 - 1)
+                    clientY: moveY
                 }}));
-                if (i % 5 === 0) await new Promise(r => setTimeout(r, 10));
+                if (i % 2 === 0) await new Promise(r => setTimeout(r, 10));
             }}
             
-            // 派发释放事件
-            btn.dispatchEvent(new MouseEvent('mouseup', {{bubbles: true, clientX: targetX, clientY: y}}));
+            // 3. 终点犹豫：模拟人眼确认位置
+            await new Promise(r => setTimeout(r, {random.randint(300, 600)}));
+            
+            // 4. 释放
+            btn.dispatchEvent(new MouseEvent('mouseup', {{bubbles: true, clientX: startX + {distance}, clientY: startY}}));
         }})();
         """
-        sb.execute_script(js_slide)
-        print("[+] JS 滑动指令执行完毕")
-        sb.sleep(12)
+        sb.execute_script(js_slide_v4_final)
+        print("[+] 指令执行完毕，等待系统校验...")
+        sb.sleep(15)
 
     except Exception as e:
-        print(f"[*] 流程异常 (已尝试跳过): {e}")
+        print(f"[*] 破解异常: {e}")
 
     # 结果捕获
     photo = "result.png"
@@ -118,10 +122,5 @@ def run_checkin(sb):
     send_tg_report(expiry, status, photo)
 
 if __name__ == "__main__":
-    # 增加禁用沙盒和共享内存限制的参数，彻底解决 Connection Refused
-    with SB(uc=True, test=True, incognito=True) as sb:
-        # 进一步优化 Chrome 启动参数
-        sb.driver.execute_cdp_cmd("Network.setUserAgentOverride", {
-            "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36"
-        })
+    with SB(uc=True, test=True, locale="zh_CN") as sb:
         run_checkin(sb)
