@@ -123,7 +123,7 @@ def run_checkin(sb):
         
         # 3. 动作后立即抓拍证据
         print("[!] 指令已穿透下发，1.5秒后抓拍...")
-        sb.sleep(1.5) 
+        sb.sleep(0.5) 
         photo = "debug_action.png"
         sb.save_screenshot(photo)
         print(f"[+] 现场截图已保存: {photo}")
