@@ -7,7 +7,6 @@ import random
 import math
 from seleniumbase import SB
 
-# 保持原作者模块导入
 try:
     from geeked.slide import SlideSolver
 except ImportError:
@@ -20,7 +19,7 @@ def send_tg_report(expiry, status, photo):
     chat_id = os.environ.get("MY_CHAT_ID")
     if not token or not chat_id: return
     now = (datetime.datetime.utcnow() + datetime.timedelta(hours=8)).strftime('%Y-%m-%d %H:%M:%S')
-    caption = f"📸 <b>Qt-Cool 物理模拟调试</b>\n---\n👤 状态: {status}\n📅 到期: {expiry}\n🕒 时间: {now}"
+    caption = f"✅ <b>Qt-Cool 签到报告</b>\n---\n👤 状态: {status}\n📅 到期: {expiry}\n🕒 时间: {now}"
     try:
         url = f"https://api.telegram.org/bot{token}/sendPhoto"
         with open(photo, 'rb') as f:
@@ -30,7 +29,7 @@ def send_tg_report(expiry, status, photo):
 def run_checkin(sb):
     sk = os.environ.get("QTCOOL_SK")
     
-    # 彻底抹除指纹
+    # 彻底抹除 WebDriver 指纹
     sb.execute_cdp_cmd("Page.addScriptToEvaluateOnNewDocument", {
         "source": "Object.defineProperty(navigator, 'webdriver', {get: () => undefined})"
     })
@@ -53,7 +52,7 @@ def run_checkin(sb):
     sb.sleep(10) 
     
     try:
-        # 1. 提取图片 URL 并计算距离
+        # 1. 提取图片并计算距离 (JS 穿透)
         js_get_imgs = """
         var bg = getComputedStyle(document.querySelector('div[class*="geetest_bg_"]')).backgroundImage;
         var slice = getComputedStyle(document.querySelector('div[class*="geetest_slice_bg_"]')).backgroundImage;
@@ -70,34 +69,61 @@ def run_checkin(sb):
         distance = solver.find_puzzle_piece_position()
         print(f"[+] 识别成功，位移: {distance}px")
         
-        # 2. 物理拖拽实现 (修正后的 API)
-        print("[*] 启动 SeleniumBase UC 物理拖拽...")
-        slider_selector = 'div[class*="geetest_btn"]'
+        # 2. 获取按钮的绝对坐标
+        print("[*] 正在获取物理坐标...")
+        location = sb.get_element('div[class*="geetest_btn"]').location
+        size = sb.get_element('div[class*="geetest_btn"]').size
         
-        # 使用 SeleniumBase 的底层 uc_gui 风格拖拽，这最接近真实物理操作
-        # 参数分别为：选择器, x方向位移, y方向位移
-        sb.drag_and_drop_with_offset(slider_selector, distance, 0)
+        # 计算中心点
+        x = location['x'] + size['width'] / 2
+        y = location['y'] + size['height'] / 2
         
-        # 动作后立即截图
-        print("[!] 拖拽动作完成，立即抓拍...")
+        # 3. 核心突破：直接调用 CDP 指令模拟最底层物理动作
+        print("[*] 正在通过 CDP 模拟物理按压与滑动...")
+        
+        # 按下鼠标
+        sb.execute_cdp_cmd("Input.dispatchMouseEvent", {
+            "type": "mousePressed", "button": "left", "x": x, "y": y, "clickCount": 1
+        })
+        
+        # 拟人化滑动：分步发送物理坐标
+        steps = 50
+        for i in range(1, steps + 1):
+            progress = i / steps
+            # 五次方缓动曲线
+            move_x = x + (distance * (1 - math.pow(1 - progress, 5)))
+            move_y = y + random.uniform(-1, 1)
+            
+            sb.execute_cdp_cmd("Input.dispatchMouseEvent", {
+                "type": "mouseMoved", "x": move_x, "y": move_y
+            })
+            # 每步微小的物理延迟
+            time.sleep(random.uniform(0.01, 0.02))
+            
+        # 释放鼠标
+        sb.execute_cdp_cmd("Input.dispatchMouseEvent", {
+            "type": "mouseReleased", "button": "left", "x": x + distance, "y": y, "clickCount": 1
+        })
+        
+        # 动作执行完后即刻抓拍
+        print("[!] 物理指令已下发，立即抓拍现场...")
         sb.sleep(1) 
-        photo = "debug_physical.png"
+        photo = "debug_final.png"
         sb.save_screenshot(photo)
         print(f"[+] 现场截图已保存: {photo}")
         
-        sb.sleep(10)
+        sb.sleep(12)
 
     except Exception as e:
-        print(f"[*] 流程异常: {e}")
+        print(f"[*] 破解异常: {e}")
         photo = "debug_error.png"
         sb.save_screenshot(photo)
 
-    # 结果上报
-    expiry = sb.get_text("#renewUserExpiry") if sb.is_element_present("#renewUserExpiry") else "Wait result..."
+    # 结果状态
+    expiry = sb.get_text("#renewUserExpiry") if sb.is_element_present("#renewUserExpiry") else "N/A"
     status = sb.get_text("#heroBadgeText") if sb.is_element_present("#heroBadgeText") else "End"
     send_tg_report(expiry, status, photo)
 
 if __name__ == "__main__":
-    # 必须开启 uc=True 才能使用高级拖拽功能
     with SB(uc=True, test=True, locale="zh_CN") as sb:
         run_checkin(sb)
