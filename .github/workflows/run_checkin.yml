@@ -15,20 +15,22 @@ jobs:
         uses: actions/setup-python@v4
         with:
           python-version: '3.10'
-          cache: 'pip' # 开启缓存，让下次安装依赖更快
+          cache: 'pip' # 开启缓存，加速后续运行
 
       - name: Install System Dependencies
         run: |
           sudo apt-get update
-          # 补充 git (ddddocr需要) 和 libglib (OpenCV需要)
-          sudo apt-get install -y libgl1-mesa-glx libglib2.0-0 git 
+          # 适配 Ubuntu 24.04：用 libgl1 替换掉过时的 libgl1-mesa-glx
+          # 必须安装 xvfb 才能使用 xvfb-run 命令
+          sudo apt-get install -y libgl1 libglib2.0-0 git xvfb
 
       - name: Install Python Dependencies
         run: |
-          # 升级 pip 并根据你的 requirements.txt 安装
+          # 升级 pip
           python -m pip install --upgrade pip
+          # 按照你的 requirements.txt 安装所有专业算法库
           if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
-          # 额外确保 seleniumbase 存在 (如果 requirements.txt 没写)
+          # 确保业务核心库 seleniumbase 已安装
           pip install seleniumbase
 
       - name: Run Qt-Cool Script
@@ -36,5 +38,5 @@ jobs:
           QTCOOL_SK: ${{ secrets.QTCOOL_SK }}
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           MY_CHAT_ID: ${{ secrets.MY_CHAT_ID }}
-        # 使用 xvfb-run 确保在无头模式下也能模拟真实显示器环境
+        # xvfb-run 会创建一个虚拟的图形显示环境，让浏览器指纹更真实
         run: xvfb-run python qt_cool.py
