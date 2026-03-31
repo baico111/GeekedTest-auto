@@ -19,7 +19,7 @@ def send_tg_report(expiry, status, photo):
     chat_id = os.environ.get("MY_CHAT_ID")
     if not token or not chat_id: return
     now = (datetime.datetime.utcnow() + datetime.timedelta(hours=8)).strftime('%Y-%m-%d %H:%M:%S')
-    caption = f"✅ <b>Qt-Cool 签到报告</b>\n---\n👤 状态: {status}\n📅 到期: {expiry}\n🕒 时间: {now}"
+    caption = f"📸 <b>Qt-Cool 物理强攻报告</b>\n---\n👤 状态: {status}\n📅 到期: {expiry}\n🕒 时间: {now}"
     try:
         url = f"https://api.telegram.org/bot{token}/sendPhoto"
         with open(photo, 'rb') as f:
@@ -29,7 +29,7 @@ def send_tg_report(expiry, status, photo):
 def run_checkin(sb):
     sk = os.environ.get("QTCOOL_SK")
     
-    # 彻底抹除 WebDriver 指纹
+    # 彻底抹除 WebDriver 特征
     sb.execute_cdp_cmd("Page.addScriptToEvaluateOnNewDocument", {
         "source": "Object.defineProperty(navigator, 'webdriver', {get: () => undefined})"
     })
@@ -48,11 +48,11 @@ def run_checkin(sb):
         print("[*] 点击签到按钮...")
         sb.click("#checkinBtn")
     
-    print("[*] 正在捕获动态验证码...")
+    print("[*] 正在等待验证码加载...")
     sb.sleep(10) 
     
     try:
-        # 1. 提取图片并计算距离 (JS 穿透)
+        # 1. 提取图片并计算位移
         js_get_imgs = """
         var bg = getComputedStyle(document.querySelector('div[class*="geetest_bg_"]')).backgroundImage;
         var slice = getComputedStyle(document.querySelector('div[class*="geetest_slice_bg_"]')).backgroundImage;
@@ -69,58 +69,64 @@ def run_checkin(sb):
         distance = solver.find_puzzle_piece_position()
         print(f"[+] 识别成功，位移: {distance}px")
         
-        # 2. 获取按钮的绝对坐标
-        print("[*] 正在获取物理坐标...")
-        location = sb.get_element('div[class*="geetest_btn"]').location
-        size = sb.get_element('div[class*="geetest_btn"]').size
+        # 2. 【核心修复】参考 bot-hosting 的物理派发逻辑
+        # 我们直接把按钮对象传给 JS，在 JS 内部完成位置锁定和滑动
+        print("[*] 正在执行 Canvas 物理层级强攻...")
         
-        # 计算中心点
-        x = location['x'] + size['width'] / 2
-        y = location['y'] + size['height'] / 2
-        
-        # 3. 核心突破：直接调用 CDP 指令模拟最底层物理动作
-        print("[*] 正在通过 CDP 模拟物理按压与滑动...")
-        
-        # 按下鼠标
-        sb.execute_cdp_cmd("Input.dispatchMouseEvent", {
-            "type": "mousePressed", "button": "left", "x": x, "y": y, "clickCount": 1
-        })
-        
-        # 拟人化滑动：分步发送物理坐标
-        steps = 50
-        for i in range(1, steps + 1):
-            progress = i / steps
-            # 五次方缓动曲线
-            move_x = x + (distance * (1 - math.pow(1 - progress, 5)))
-            move_y = y + random.uniform(-1, 1)
+        js_physical_drag = f"""
+        (function(distance) {{
+            var btn = document.querySelector('div[class*="geetest_btn"]');
+            if (!btn) return "BUTTON_NOT_FOUND";
             
-            sb.execute_cdp_cmd("Input.dispatchMouseEvent", {
-                "type": "mouseMoved", "x": move_x, "y": move_y
-            })
-            # 每步微小的物理延迟
-            time.sleep(random.uniform(0.01, 0.02))
+            var rect = btn.getBoundingClientRect();
+            var sx = rect.left + rect.width / 2;
+            var sy = rect.top + rect.height / 2;
+            var ex = sx + distance;
+
+            function fire(type, x, y) {{
+                var e = new MouseEvent(type, {{
+                    bubbles: true, cancelable: true, view: window,
+                    clientX: x, clientY: y, buttons: 1
+                }});
+                btn.dispatchEvent(e);
+            }}
+
+            // 执行物理三段式滑动
+            fire('mousedown', sx, sy);
             
-        # 释放鼠标
-        sb.execute_cdp_cmd("Input.dispatchMouseEvent", {
-            "type": "mouseReleased", "button": "left", "x": x + distance, "y": y, "clickCount": 1
-        })
+            // 模拟分段平滑移动（参考你提供的代码逻辑）
+            setTimeout(function() {{
+                fire('mousemove', (sx + ex) / 2, sy + (Math.random() * 4 - 2));
+                setTimeout(function() {{
+                    fire('mousemove', ex, sy);
+                    setTimeout(function() {{
+                        fire('mouseup', ex, sy);
+                    }}, 200);
+                }}, 150);
+            }}, 150);
+            
+            return "SUCCESS: Dragged " + distance + "px";
+        }})({distance});
+        """
         
-        # 动作执行完后即刻抓拍
-        print("[!] 物理指令已下发，立即抓拍现场...")
+        result = sb.execute_script(js_physical_drag)
+        print(f"[*] JS 执行反馈: {result}")
+        
+        # 动作执行完后即刻抓拍（秒截）
         sb.sleep(1) 
-        photo = "debug_final.png"
+        photo = "debug_action.png"
         sb.save_screenshot(photo)
-        print(f"[+] 现场截图已保存: {photo}")
+        print(f"[+] 现场抓拍已保存: {photo}")
         
-        sb.sleep(12)
+        sb.sleep(10)
 
     except Exception as e:
-        print(f"[*] 破解异常: {e}")
+        print(f"[*] 流程异常: {e}")
         photo = "debug_error.png"
         sb.save_screenshot(photo)
 
-    # 结果状态
-    expiry = sb.get_text("#renewUserExpiry") if sb.is_element_present("#renewUserExpiry") else "N/A"
+    # 最终报告
+    expiry = sb.get_text("#renewUserExpiry") if sb.is_element_present("#renewUserExpiry") else "Wait..."
     status = sb.get_text("#heroBadgeText") if sb.is_element_present("#heroBadgeText") else "End"
     send_tg_report(expiry, status, photo)
 
