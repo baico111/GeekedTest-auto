@@ -1,19 +1,17 @@
-name: Check and Update Geetest Version
+name: Auto Update Geetest Logic
 on:
   schedule:
     - cron: '0 */12 * * *'
-  workflow_dispatch:  # Allows manual triggering
+  workflow_dispatch:
 
 jobs:
   update:
     runs-on: ubuntu-latest
-
+    permissions:
+      contents: write  # 必须开启写入权限
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
-        with:
-          token: ${{ secrets.GITHUB_TOKEN }}
-          fetch-depth: 0
 
       - name: Set up Python
         uses: actions/setup-python@v4
@@ -21,47 +19,28 @@ jobs:
           python-version: '3.x'
           
       - name: Install dependencies
-        run: |
-          pip install requests
+        run: pip install requests
           
-      - name: Run script and capture output
+      - name: Run Deobfuscator
         id: run_script
         run: |
           output=$(python deobfuscate.py)
-          echo "$output"
           echo "VERSION=$(echo "$output" | grep '\[~\] Version:' | awk '{print $3}')" >> $GITHUB_ENV
           echo "ABO=$(echo "$output" | grep '\[+\] abo:' | sed 's/.*: //')" >> $GITHUB_ENV
           echo "MAPPINGS=$(echo "$output" | grep '\[+\] mappings' | sed 's/\[+\] mappings //')" >> $GITHUB_ENV
           echo "DEVICE_ID=$(echo "$output" | grep '\[+\] device_id:' | sed -n 's/.*: \(\"[^\"]*\"\).*/\1/p')" >> $GITHUB_ENV
 
-      - name: Update README.md
+      - name: Force Update Logic Files
         run: |
-          sed -i "s/Version: v[0-9]\+\.[0-9]\+\.[0-9]\+-[a-f0-9]\+/Version: $VERSION/" readme.md
-
-      - name: Update geeked/sign.py
-        run: |
+          # 强制替换 sign.py 里的动态常量
           sed -i "s|self.mapping = {.*}|self.mapping = $MAPPINGS|" ./geeked/sign.py
           sed -i "s|abo = {.*}|abo = $ABO|" ./geeked/sign.py
           sed -i "s|\"device_id\": \".*\"|\"device_id\": $DEVICE_ID|" ./geeked/sign.py
 
-      - name: Check for changes
-        id: check_changes
+      - name: Auto Push to Main
         run: |
-          git status
-          if git diff --quiet && git diff --staged --quiet; then
-            echo "No changes detected."
-            echo "changed=false" >> $GITHUB_ENV
-          else
-            echo "Changes detected."
-            echo "changed=true" >> $GITHUB_ENV
-          fi
-
-      - name: Create Pull Request
-        if: env.changed == 'true'
-        uses: peter-evans/create-pull-request@v5
-        with:
-          commit-message: "Update Geetest version to ${{ env.VERSION }}"
-          branch: update-version-${{ env.VERSION }}
-          title: "Update Geetest version to ${{ env.VERSION }}"
-          body: "Geetest Updated! Automated update of readme.md and geeked/sign.py."
-          base: main
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+          git add .
+          # 只有在有变化时才提交，防止报错
+          git diff --quiet && git diff --staged --quiet || (git commit -m "🤖 自动同步极验算法: ${{ env.VERSION }}" && git push)
