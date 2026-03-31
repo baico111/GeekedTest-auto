@@ -1,4 +1,5 @@
 opencv-python~=4.10.0.84
+seleniumbase
 numpy~=2.2.1
 requests~=2.32.3
 pycryptodome~=3.21.0
