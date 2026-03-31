@@ -8,26 +8,24 @@ import random
 import math
 from seleniumbase import SB
 
-# 保持原作者模块导入
+# 严格保持原作者模块导入
 try:
     from geeked.slide import SlideSolver
 except ImportError:
-    print("[-] 模块导入失败")
+    print("[-] 警告: 未找到 geeked 模块")
 
 CHECKIN_URL = "https://gpt.qt.cool/checkin"
 
 def get_human_track(distance):
     track = []
     current = 0
-    # 模拟真人的“先快后慢”轨迹
-    steps = random.randint(55, 75)
+    steps = random.randint(60, 80) # 进一步放慢，模拟精细对准
     for i in range(1, steps + 1):
         t = i / steps
         move = round(distance * (1 - math.pow(1 - t, 3)))
         track.append(move - current)
         current = move
-    # 停顿与回退
-    track.extend([1, 0, -1, 0])
+    track.extend([1, 0, -1]) 
     return track
 
 def send_tg_report(expiry, status, photo):
@@ -46,19 +44,19 @@ def run_checkin(sb):
     from selenium.webdriver.common.action_chains import ActionChains
     sk = os.environ.get("QTCOOL_SK")
     
-    # 强制抹除自动化指纹
+    # 抹除自动化特征
     sb.execute_cdp_cmd("Page.addScriptToEvaluateOnNewDocument", {
         "source": "Object.defineProperty(navigator, 'webdriver', {get: () => undefined})"
     })
 
     print("[*] 正在载入晴辰云...")
     sb.open(CHECKIN_URL)
-    sb.sleep(4)
+    sb.sleep(5)
     
-    # 登录流程
+    # 登录
     sb.type('input#renewKey', sk)
     sb.click('button[onclick*="doRenewLogin"]')
-    sb.sleep(6)
+    sb.sleep(8)
     
     # 点击签到
     if sb.is_element_visible("#checkinBtn"):
@@ -66,59 +64,62 @@ def run_checkin(sb):
         sb.click("#checkinBtn")
     
     print("[*] 正在捕获动态验证码容器...")
-    sb.sleep(5)
+    sb.sleep(6)
     
     try:
-        # --- 根据你的截图修改的定位逻辑 ---
-        # 寻找当前可见的那个极验容器
-        all_containers = sb.find_elements('div[class*="geetest_captcha"]')
-        active_container = None
-        for container in all_containers:
-            if container.is_displayed():
-                active_container = container
-                break
+        # 定位滑块图片元素
+        bg_element = 'div[class*="geetest_canvas_img"]'
+        slice_element = 'div[class*="geetest_slice_bg"]'
         
-        if not active_container:
-            # 备选方案：通过 canvas 标签直接定位
-            print("[*] 未找到显式容器，尝试直接定位 Canvas...")
-            sb.wait_for_element_visible('canvas.geetest_canvas_bg', timeout=15)
+        sb.wait_for_element_visible(bg_element, timeout=15)
         
-        # 提取背景和滑块图片
-        # 注意：使用 execute_script 抓取 computed style 最稳
-        bg_url = sb.execute_script('return getComputedStyle(document.querySelector("div[class*=\'geetest_canvas_img\']")).backgroundImage').split('"')[1]
-        slice_url = sb.execute_script('return getComputedStyle(document.querySelector("div[class*=\'geetest_slice_bg\']")).backgroundImage').split('"')[1]
+        # 提取 URL 的保险逻辑
+        def get_url(selector):
+            style = sb.get_attribute(selector, "style")
+            match = re.search(r'url\("?(.*?)"?\)', style)
+            return match.group(1) if match else None
+
+        bg_url = get_url(bg_element)
+        slice_url = get_url(slice_element)
+
+        if not bg_url or not slice_url:
+            raise Exception("无法提取验证码图片 URL")
+
+        print(f"[+] 抓取图片成功: {bg_url[:50]}...")
         
-        print(f"[+] 抓取图片成功，启动 OpenCV...")
-        solver = SlideSolver(
-            puzzle_piece=SlideSolver.load_image(slice_url),
-            background=SlideSolver.load_image(bg_url)
-        )
+        # 下载图片内容
+        bg_content = requests.get(bg_url).content
+        slice_content = requests.get(slice_url).content
+        
+        # 正确调用原作者的 SlideSolver
+        # 注意：这里直接传入图片二进制内容，由 SlideSolver 内部处理
+        solver = SlideSolver(slice_content, bg_content)
         distance = solver.find_puzzle_piece_position()
+        
         print(f"[+] 识别距离: {distance}px")
         
-        # 定位滑动按钮
+        # 执行滑动
         slider_btn = sb.find_element('div[class*="slider_button"]')
         tracks = get_human_track(distance)
         
         ActionChains(sb.driver).click_and_hold(slider_btn).perform()
         for x in tracks:
-            # 模拟人手抖动，增加随机微小位移
-            ActionChains(sb.driver).move_by_offset(x, random.uniform(-1, 1)).perform()
-            time.sleep(random.uniform(0.005, 0.015))
+            ActionChains(sb.driver).move_by_offset(x, random.choice([-1, 0, 1])).perform()
+            time.sleep(random.uniform(0.01, 0.02))
         
         sb.sleep(1)
         ActionChains(sb.driver).release().perform()
         print("[+] 滑动动作已完成")
-        sb.sleep(8)
+        sb.sleep(10)
 
     except Exception as e:
         print(f"[*] 破解失败详情: {e}")
 
-    # 结果截图与发送
+    # 截图报告
     photo = "result.png"
     sb.save_screenshot(photo)
     expiry = sb.get_text("#renewUserExpiry") if sb.is_element_present("#renewUserExpiry") else "Unknown"
-    status = sb.get_text("#heroBadgeText") if sb.is_element_present("#heroBadgeText") else "Finished"
+    status = sb.get_text("#heroBadgeText") if sb.is_element_present("#heroBadgeText") else "End"
     send_tg_report(expiry, status, photo)
 
 if __name__ == "__main__":
