@@ -16,6 +16,7 @@ from geeked.icon import IconSolver
 
 class LotParser:
     def __init__(self):
+        # 这一行由 GitHub Actions 自动更新，请保持格式
         self.mapping = {"(n[0:0]+n[25:25]+n[18:18]+n[8:8])+.+(n[23:26])+.+(n[8:8]+n[15:15]+n[0:0]+n[13:13])":'n[4:11]'}
         self.lot = []
         self.lot_res = []
@@ -181,13 +182,14 @@ function encrypt_asymmetric_2(input, key) {
     def generate_w(data: dict, captcha_id: str, risk_type: str):
         lot_number = data['lot_number']
         pow_detail = data['pow_detail']
+        # 这一行由 GitHub Actions 自动更新
         abo = {"QBTi":"TqIJ"}
         base = abo | {
             **Signer.generate_pow(lot_number, captcha_id, pow_detail['hashfunc'], pow_detail['version'],
                                   pow_detail['bits'], pow_detail['datetime'], ""),
             **lotParser.get_dict(lot_number),
             "biht": "1426265548",  # static
-            "device_id": "",  # why is this empty!!
+            "device_id": "",  # 这一行由 GitHub Actions 自动更新
             "em": {  # save to have this static (see em.js)
                 "cp": 0,  # checkCallPhantom
                 "ek": "11",  # checkErrorKeys "11" as value is also fine
