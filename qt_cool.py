@@ -7,6 +7,7 @@ import random
 import math
 from seleniumbase import SB
 
+# 保持原作者模块导入
 try:
     from geeked.slide import SlideSolver
 except ImportError:
@@ -19,7 +20,7 @@ def send_tg_report(expiry, status, photo):
     chat_id = os.environ.get("MY_CHAT_ID")
     if not token or not chat_id: return
     now = (datetime.datetime.utcnow() + datetime.timedelta(hours=8)).strftime('%Y-%m-%d %H:%M:%S')
-    caption = f"📸 <b>Qt-Cool 物理拖拽调试</b>\n---\n👤 状态: {status}\n📅 到期: {expiry}\n🕒 时间: {now}"
+    caption = f"📸 <b>Qt-Cool 物理模拟调试</b>\n---\n👤 状态: {status}\n📅 到期: {expiry}\n🕒 时间: {now}"
     try:
         url = f"https://api.telegram.org/bot{token}/sendPhoto"
         with open(photo, 'rb') as f:
@@ -29,7 +30,7 @@ def send_tg_report(expiry, status, photo):
 def run_checkin(sb):
     sk = os.environ.get("QTCOOL_SK")
     
-    # 彻底抹除 WebDriver 特征
+    # 彻底抹除指纹
     sb.execute_cdp_cmd("Page.addScriptToEvaluateOnNewDocument", {
         "source": "Object.defineProperty(navigator, 'webdriver', {get: () => undefined})"
     })
@@ -52,7 +53,7 @@ def run_checkin(sb):
     sb.sleep(10) 
     
     try:
-        # 提取图片并计算距离
+        # 1. 提取图片 URL 并计算距离
         js_get_imgs = """
         var bg = getComputedStyle(document.querySelector('div[class*="geetest_bg_"]')).backgroundImage;
         var slice = getComputedStyle(document.querySelector('div[class*="geetest_slice_bg_"]')).backgroundImage;
@@ -69,15 +70,15 @@ def run_checkin(sb):
         distance = solver.find_puzzle_piece_position()
         print(f"[+] 识别成功，位移: {distance}px")
         
-        # --- 核心修改：使用 SeleniumBase 底层封装的物理拖拽 ---
-        # 这一步会尝试模拟最接近真实的物理按压并移动
-        print("[*] 启动物理引擎拖拽...")
+        # 2. 物理拖拽实现 (修正后的 API)
+        print("[*] 启动 SeleniumBase UC 物理拖拽...")
         slider_selector = 'div[class*="geetest_btn"]'
         
-        # 增加 Y 轴微小抖动，确保不被判定为直线脚本
-        sb.drag_and_drop_by_offset(slider_selector, distance, random.randint(-1, 1))
+        # 使用 SeleniumBase 的底层 uc_gui 风格拖拽，这最接近真实物理操作
+        # 参数分别为：选择器, x方向位移, y方向位移
+        sb.drag_and_drop_with_offset(slider_selector, distance, 0)
         
-        # 动作执行完后立即截图
+        # 动作后立即截图
         print("[!] 拖拽动作完成，立即抓拍...")
         sb.sleep(1) 
         photo = "debug_physical.png"
@@ -91,13 +92,12 @@ def run_checkin(sb):
         photo = "debug_error.png"
         sb.save_screenshot(photo)
 
-    # 结果状态
-    expiry = sb.get_text("#renewUserExpiry") if sb.is_element_present("#renewUserExpiry") else "Wait..."
+    # 结果上报
+    expiry = sb.get_text("#renewUserExpiry") if sb.is_element_present("#renewUserExpiry") else "Wait result..."
     status = sb.get_text("#heroBadgeText") if sb.is_element_present("#heroBadgeText") else "End"
-    
     send_tg_report(expiry, status, photo)
 
 if __name__ == "__main__":
-    # 使用增强 UC 模式启动，这能解决一部分 isTrusted 拦截问题
+    # 必须开启 uc=True 才能使用高级拖拽功能
     with SB(uc=True, test=True, locale="zh_CN") as sb:
         run_checkin(sb)
