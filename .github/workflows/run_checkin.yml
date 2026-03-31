@@ -15,19 +15,26 @@ jobs:
         uses: actions/setup-python@v4
         with:
           python-version: '3.10'
+          cache: 'pip' # 开启缓存，让下次安装依赖更快
 
-      - name: Install System Deps
+      - name: Install System Dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y libgl1-mesa-glx # OpenCV 运行必须的系统库
+          # 补充 git (ddddocr需要) 和 libglib (OpenCV需要)
+          sudo apt-get install -y libgl1-mesa-glx libglib2.0-0 git 
 
-      - name: Install Python Libs
+      - name: Install Python Dependencies
         run: |
-          pip install seleniumbase opencv-python-headless numpy requests pycryptodome
+          # 升级 pip 并根据你的 requirements.txt 安装
+          python -m pip install --upgrade pip
+          if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
+          # 额外确保 seleniumbase 存在 (如果 requirements.txt 没写)
+          pip install seleniumbase
 
       - name: Run Qt-Cool Script
         env:
           QTCOOL_SK: ${{ secrets.QTCOOL_SK }}
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           MY_CHAT_ID: ${{ secrets.MY_CHAT_ID }}
-        run: python qt_cool.py
+        # 使用 xvfb-run 确保在无头模式下也能模拟真实显示器环境
+        run: xvfb-run python qt_cool.py
