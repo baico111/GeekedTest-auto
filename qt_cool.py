@@ -1,19 +1,8 @@
 import os
 import time
-import datetime
-import requests
 import re
-import random
-import math
+import requests
 from seleniumbase import SB
-
-# 保持原作者模块导入逻辑
-try:
-    from geeked.slide import SlideSolver
-except ImportError:
-    print("[-] 模块导入失败")
-
-CHECKIN_URL = "https://gpt.qt.cool/checkin"
 
 def run_checkin(sb):
     sk = os.environ.get("QTCOOL_SK")
@@ -24,7 +13,7 @@ def run_checkin(sb):
     })
 
     print("[*] 正在载入晴辰云...")
-    sb.open(CHECKIN_URL)
+    sb.open("https://gpt.qt.cool/checkin")
     sb.sleep(5)
     
     # 登录
@@ -37,97 +26,64 @@ def run_checkin(sb):
         print("[*] 点击签到按钮...")
         sb.click("#checkinBtn")
     
-    print("[*] 正在捕获动态验证码...")
-    sb.sleep(10) 
+    print("[*] 等待验证码弹出...")
+    sb.sleep(8) 
     
     try:
-        # 1. 提取图片并计算位移 (JS 穿透)
-        js_get_imgs = """
-        var bg = getComputedStyle(document.querySelector('div[class*="geetest_bg_"]')).backgroundImage;
-        var slice = getComputedStyle(document.querySelector('div[class*="geetest_slice_bg_"]')).backgroundImage;
-        return [bg, slice];
-        """
-        urls = sb.execute_script(js_get_imgs)
-        bg_url = re.search(r'url\("?(.*?)"?\)', urls[0]).group(1)
-        slice_url = re.search(r'url\("?(.*?)"?\)', urls[1]).group(1)
-
-        bg_content = requests.get(bg_url, timeout=10).content
-        slice_content = requests.get(slice_url, timeout=10).content
+        # --- 核心调试逻辑：物理层级暴力同步移动 ---
+        # 我们寻找你提供的 geetest_btn，并强行让它位移 50 像素
+        print("[!] 正在尝试点击并小幅度位移...")
         
-        solver = SlideSolver(slice_content, bg_content)
-        distance = solver.find_puzzle_piece_position()
-        print(f"[+] 识别成功，目标位移: {distance}px")
-        
-        # 2. 【核心突破】针对 Transform 属性的同步强攻逻辑
-        # 我们不仅派发事件，还强行修改 style 里的 translate 属性，让它“不得不动”
-        print("[*] 执行 CSS Transform 强力同步滑动...")
-        
-        js_transform_attack = f"""
-        (function(dist) {{
+        js_force_move = """
+        (function() {
             var btn = document.querySelector('div[class*="geetest_btn"]');
-            var slice = document.querySelector('div[class*="geetest_slice_bg_"]');
-            if (!btn || !slice) return "ELEMENT_NOT_FOUND";
+            var slice = document.querySelector('div[class*="geetest_slice_"]');
+            if (!btn) return "NOT_FOUND";
             
             var rect = btn.getBoundingClientRect();
             var x = rect.left + rect.width / 2;
             var y = rect.top + rect.height / 2;
-
-            function fire(type, cx) {{
-                var e = new MouseEvent(type, {{
-                    bubbles: true, cancelable: true, view: window,
-                    clientX: cx, clientY: y, buttons: 1
-                }});
-                btn.dispatchEvent(e);
-            }}
-
-            // A. 按下
-            fire('mousedown', x);
             
-            // B. 强制同步滑动：每一步都强行改写 style
-            var steps = 30;
-            for(var i=0; i<=steps; i++) {{
-                var currentDist = dist * (i / steps);
-                var moveX = x + currentDist;
-                
-                // 核心：强行修改你截图中的那个 transform 属性
-                btn.style.transform = "translate(" + currentDist + "px, 0px)";
-                slice.style.transform = "translate(" + currentDist + "px, 0px)";
-                
-                fire('mousemove', moveX);
-            }}
+            // 1. 模拟物理按下
+            btn.dispatchEvent(new MouseEvent('mousedown', {bubbles: true, clientX: x, clientY: y, buttons: 1}));
             
-            // C. 释放
-            fire('mouseup', x + dist);
-            return "SUCCESS: Forced " + dist + "px";
-        }})({distance});
+            // 2. 强行修改 CSS Transform 使其在视觉上产生 50px 位移
+            var offset = 50;
+            var moveX = x + offset;
+            
+            btn.style.transform = "translate(" + offset + "px, 0px)";
+            if(slice) slice.style.transform = "translate(" + offset + "px, 0px)";
+            
+            // 3. 模拟物理移动
+            btn.dispatchEvent(new MouseEvent('mousemove', {bubbles: true, clientX: moveX, clientY: y, buttons: 1}));
+            
+            // 4. 立即释放
+            btn.dispatchEvent(new MouseEvent('mouseup', {bubbles: true, clientX: moveX, clientY: y}));
+            
+            return "DONE_MOVE_50PX";
+        })();
         """
         
-        res = sb.execute_script(js_transform_attack)
-        print(f"[*] 强攻执行结果: {res}")
+        result = sb.execute_script(js_force_move)
+        print(f"[*] JS 动作反馈: {result}")
         
-        # 3. 动作后秒截
-        sb.sleep(1) 
-        photo = "debug_action.png"
+        # --- 关键：动作完成后立即截图，不留任何喘息机会 ---
+        sb.sleep(0.1) 
+        photo = "action_snap.png"
         sb.save_screenshot(photo)
-        print(f"[+] 现场抓拍已保存: {photo}")
-        
-        sb.sleep(10)
+        print(f"[+] 动作快照已保存: {photo}")
 
     except Exception as e:
-        print(f"[*] 流程异常: {e}")
-        photo = "debug_error.png"
-        sb.save_screenshot(photo)
+        print(f"[*] 调试异常: {e}")
+        sb.save_screenshot("debug_error.png")
 
-    # 发送报告
-    expiry = sb.get_text("#renewUserExpiry") if sb.is_element_present("#renewUserExpiry") else "N/A"
-    status = sb.get_text("#heroBadgeText") if sb.is_element_present("#heroBadgeText") else "End"
-    
+    # 发送截图到 TG
     token = os.environ.get("TELEGRAM_BOT_TOKEN")
     chat_id = os.environ.get("MY_CHAT_ID")
     if token and chat_id:
         url = f"https://api.telegram.org/bot{token}/sendPhoto"
         with open(photo, 'rb') as f:
-            requests.post(url, data={'chat_id': chat_id, 'caption': f"👤 {status}\n📅 {expiry}", 'parse_mode': 'HTML'}, files={'photo': f})
+            requests.post(url, data={'chat_id': chat_id, 'caption': f"📸 动作抓拍测试\n结果: {result}"}, files={'photo': f})
 
 if __name__ == "__main__":
     with SB(uc=True, test=True, locale="zh_CN") as sb:
