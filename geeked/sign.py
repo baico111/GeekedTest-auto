@@ -17,7 +17,7 @@ from geeked.icon import IconSolver
 class LotParser:
     def __init__(self):
         # 这一行由 GitHub Actions 自动更新，请保持格式
-        self.mapping = {"(n[0:0]+n[25:25]+n[18:18]+n[8:8])+.+(n[23:26])+.+(n[8:8]+n[15:15]+n[0:0]+n[13:13])":'n[4:11]'}
+        self.mapping = {"(n[23:28])+.+(n[15:15]+n[2:2]+n[4:4]+n[17:17])":'n[27:30]'}
         self.lot = []
         self.lot_res = []
         for k, v in self.mapping.items():
@@ -183,7 +183,7 @@ function encrypt_asymmetric_2(input, key) {
         lot_number = data['lot_number']
         pow_detail = data['pow_detail']
         # 这一行由 GitHub Actions 自动更新
-        abo = {"QBTi":"TqIJ"}
+        abo = {"XwNA":"adEG"}
         base = abo | {
             **Signer.generate_pow(lot_number, captcha_id, pow_detail['hashfunc'], pow_detail['version'],
                                   pow_detail['bits'], pow_detail['datetime'], ""),
